@@ -323,6 +323,80 @@ objectNames[0x2f1] = "EnvKarehaUp       "
 objectNames[0x2f2] = "M_obj_kanban_y    "
 objectNames[0x2f3] = "DKfalls           "
 
+const conditionalModeOptions = [
+	{ str: "None", value: 0 },
+	{ str: "Lap Range", value: 1 },
+	{ str: "Checkpoint Range", value: 2 },
+	{ str: "Lap Range (Inverted)", value: 3 },
+	{ str: "Checkpoint Range (Inverted)", value: 4 },
+]
+
+function clampCondIndex(value)
+{
+	value = Math.round(value)
+	if (!isFinite(value))
+		value = 0
+	return Math.max(0, Math.min(7, value))
+}
+
+function isLapCondMode(mode)
+{
+	return mode == 1 || mode == 3
+}
+
+function isInvertedCondMode(mode)
+{
+	return mode == 3 || mode == 4
+}
+
+function getCondDisplayStart(p)
+{
+	let mode = p.condMode || 0
+	let start = p.condStart || 0
+	if (isLapCondMode(mode))
+		return clampCondIndex(start) + 1
+	return clampCondIndex(start)
+}
+
+function getCondDisplayEnd(p)
+{
+	let mode = p.condMode || 0
+	let end = p.condEnd || 0
+	if (isLapCondMode(mode))
+		return clampCondIndex(end) + 1
+	return clampCondIndex(end)
+}
+
+function condDisplayToRaw(mode, value)
+{
+	if (isLapCondMode(mode))
+		return clampCondIndex(value - 1)
+	return clampCondIndex(value)
+}
+
+function describeConditional(p)
+{
+	let mode = p.condMode || 0
+	if (mode == 0)
+		return "<strong>Conditional State:</strong> Disabled"
+
+	let start = clampCondIndex(p.condStart || 0)
+	let end = clampCondIndex(p.condEnd || 0)
+	
+	if (isLapCondMode(mode))
+	{
+		start += 1
+		end += 1
+	}
+	
+	let targetName = isLapCondMode(mode) ? "laps" : "checkpoint regions"
+	let wraps = (p.condStart || 0) > (p.condEnd || 0) ? " (wrap-around)" : ""
+
+	if (isInvertedCondMode(mode))
+		return "<strong>Conditional State:</strong> OFF in " + targetName + " " + start + " to " + end + wraps + ", ON elsewhere"
+	return "<strong>Conditional State:</strong> ON in " + targetName + " " + start + " to " + end + wraps + ", OFF elsewhere"
+}
+
 
 class ViewerObjects extends PointViewer
 {
@@ -404,8 +478,39 @@ class ViewerObjects extends PointViewer
 				panel.addSelectionNumericInput(selectionGroup, "Setting " + (s + 1), -0x8000, 0x7fff, selectedPoints.map(p => p.settings[s] >= 0x8000 ? p.settings[s] - 0x10000 : p.settings[s]), 1.0, 1.0, enabled, multiedit, (x, i) => { this.window.setNotSaved(); selectedPoints[i].settings[s] = (x < 0 ? 0x10000 + x : x) })
 			else
 				panel.addSelectionNumericInput(selectionGroup, "Setting " + (s + 1), 0, 0xffff, selectedPoints.map(p => p.settings[s]), 1.0, 1.0, enabled, multiedit, (x, i) => { this.window.setNotSaved(); selectedPoints[i].settings[s] = x })
+
+		panel.addSpacer(selectionGroup)
+		panel.addText(selectionGroup, "<strong>Conditional Objects (Presence Flags bits 3-11):</strong>")
+		panel.addSelectionDropdown(selectionGroup, "Cond. Mode", selectedPoints.map(p => p.condMode || 0), conditionalModeOptions, enabled, multiedit, (x, i) => {
+			this.window.setNotSaved()
+			selectedPoints[i].condMode = x
+		})
+		panel.addSelectionNumericInput(selectionGroup, "Cond. Start", 0, 8, selectedPoints.map(p => getCondDisplayStart(p)), 1.0, 1.0, enabled, multiedit, (x, i) => {
+			this.window.setNotSaved()
+			let mode = selectedPoints[i].condMode || 0
+			if (mode == 0) { selectedPoints[i].condMode = 1; mode = 1 }
+			selectedPoints[i].condStart = condDisplayToRaw(mode, x)
+		})
+		panel.addSelectionNumericInput(selectionGroup, "Cond. End", 0, 8, selectedPoints.map(p => getCondDisplayEnd(p)), 1.0, 1.0, enabled, multiedit, (x, i) => {
+			this.window.setNotSaved()
+			let mode = selectedPoints[i].condMode || 0
+			if (mode == 0) { selectedPoints[i].condMode = 1; mode = 1 }
+			selectedPoints[i].condEnd = condDisplayToRaw(mode, x)
+		})
+		if (enabled && selectedPoints.length > 0)
+		{
+			let first = selectedPoints[0]
+			let allSame = selectedPoints.every(p => (p.condMode || 0) === (first.condMode || 0) && (p.condStart || 0) === (first.condStart || 0) && (p.condEnd || 0) === (first.condEnd || 0))
+			if (allSame)
+				panel.addText(selectionGroup, describeConditional(first))
+			else
+				panel.addText(selectionGroup, "<strong>Conditional State:</strong> Multiple selected objects have different conditional values")
+		}
+
+		panel.addSpacer(selectionGroup)
+		panel.addSelectionNumericInput(selectionGroup, "Padding", 0, 0xffff, selectedPoints.map(p => p.xpfThing ?? 0), 1.0, 1.0, enabled, multiedit, (x, i) => { this.window.setNotSaved(); selectedPoints[i].xpfThing = x })
 		
-		panel.addSelectionNumericInput(selectionGroup, "Presence", 0, 0xffff, selectedPoints.map(p => p.presence), 1.0, 1.0, enabled, multiedit, (x, i) => { this.window.setNotSaved(); selectedPoints[i].presence = x })
+		panel.addSelectionNumericInput(selectionGroup, "Presence", 0, 0x7, selectedPoints.map(p => p.presence & 0x7), 1.0, 1.0, enabled, multiedit, (x, i) => { this.window.setNotSaved(); selectedPoints[i].presence = x & 0x7 })
 	}
 	
 	

@@ -261,6 +261,20 @@ class KmpData
 					}
 					sectionData[sectionId].entries.push(props)
 				}
+
+				// After reading all GOBJ entries, unpack conditional fields from presence flags
+				if (sectionId === "GOBJ" && entryNum > 0)
+				{
+					for (let i = 0; i < sectionData["GOBJ"].entries.length; i++)
+					{
+						let p = sectionData["GOBJ"].entries[i]
+						let flags = p.presence || 0
+						p.condMode = (flags >> 3) & 0x7
+						p.condStart = (flags >> 6) & 0x7
+						p.condEnd = (flags >> 9) & 0x7
+						p.presence = flags & 0x7
+					}
+				}
 			}
 			else  // read unhandled sections
 			{
@@ -311,6 +325,13 @@ class KmpData
 			{
 				let node = data[graph].addNode()
 				cloneProperties(node, kmpPoint, sectionId)
+				if (sectionId === "GOBJ")
+				{
+					node.condMode = kmpPoint.condMode || 0
+					node.condStart = kmpPoint.condStart || 0
+					node.condEnd = kmpPoint.condEnd || 0
+					node.presence = kmpPoint.presence & 0x7
+				}
 			}
 		}
 
@@ -773,8 +794,18 @@ class KmpData
 			alert("Warning: More than 255 objects found (" + this.objects.nodes.length + ").\nTrack slot 5.3 is required for objects to load correctly.")
 
 		for (let p of this.objects.nodes)
+		{
+			// Pack conditional fields into presence before writing
+			let packedPresence = (p.presence & 0x7)
+				| (((p.condMode || 0) & 0x7) << 3)
+				| (((p.condStart || 0) & 0x7) << 6)
+				| (((p.condEnd || 0) & 0x7) << 9)
+			let saved = p.presence
+			p.presence = packedPresence
 			for (let prop in format[sectionId])
 				w.write(format[sectionId][prop], p[prop])
+			p.presence = saved
+		}
 		
 		// Write POTI
 		sectionId = "POTI"
@@ -978,12 +1009,21 @@ class KmpData
 			node.rotation = new Vec3(0, 0, 0)
 			node.scale = new Vec3(1, 1, 1)
 			node.id = 0
+			node.xpfThing = 0
 			node.route = null
 			node.routeIndex = 0xffff
 			node.settings = [0, 0, 0, 0, 0, 0, 0, 0]
 			node.presence = 7
+			node.condMode = 0
+			node.condStart = 0
+			node.condEnd = 0
 		}
-		this.objects.onCloneNode = (newNode, oldNode) => { cloneProperties(newNode, oldNode, "GOBJ") }
+		this.objects.onCloneNode = (newNode, oldNode) => {
+			cloneProperties(newNode, oldNode, "GOBJ")
+			newNode.condMode = oldNode.condMode || 0
+			newNode.condStart = oldNode.condStart || 0
+			newNode.condEnd = oldNode.condEnd || 0
+		}
 		
 		this.checkpointPoints = new NodeGraph()
 		this.checkpointPoints.maxNextNodes = 6
